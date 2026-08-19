@@ -9,7 +9,7 @@
 #
 # usage: */30 * * * * /bin/bash /home/lnd/htlcScan.sh
 #
-# version: 1.5
+# version: 1.6
 
 # setup telegram bot
 # Check if the config file exists
@@ -25,7 +25,8 @@ else
 fi
 
 # notify me if limit of pending HTLCs > X
-NOTIFYLIMIT=10
+NOTIFYLIMIT="${NOTIFYLIMIT:-10}"
+MIN_BLOCKS_TIL_EXPIRY="${MIN_BLOCKS_TIL_EXPIRY:--10}"
 
 # define lncli command - (un)comment which applies
 # bolt/blitz installation
@@ -83,6 +84,7 @@ function reconnect {
 # calculate critical expiration height
 blocks_til_expiry=13
 current_block_height=$($_CMD_LNCLI getinfo | jq .block_height)
+min_expiry=$((current_block_height + MIN_BLOCKS_TIL_EXPIRY))
 max_expiry=$((current_block_height + blocks_til_expiry))
 
 # load channel list once
@@ -91,9 +93,9 @@ listchannels=$($_CMD_LNCLI listchannels)
 # fetch pending htlcs
 # check for outgoing and incoming
 # reconnect predecessor and successor peer of critical htlcs
-htlc_list=$(echo $listchannels | jq -r  ".channels[] | .pending_htlcs[] | select(.expiration_height < $max_expiry) | .hash_lock" | sort -u)
+htlc_list=$(echo $listchannels | jq -r  ".channels[] | .pending_htlcs[] | select(.expiration_height >= $min_expiry and .expiration_height < $max_expiry) | .hash_lock" | sort -u)
 if [ -z "$htlc_list" ]; then
-  echo "$(date "+%Y-%m-%d %H:%M:%S") no htlc(s) found with expiration < $blocks_til_expiry blocks"
+  echo "$(date "+%Y-%m-%d %H:%M:%S") no htlc(s) found with expiration range $MIN_BLOCKS_TIL_EXPIRY to $blocks_til_expiry blocks"
   numhtlcs=$(echo $listchannels | jq -r  ".channels[] | .pending_htlcs[] | select(.expiration_height) | .hash_lock" | wc -l)
   [[ "$numhtlcs" -gt $NOTIFYLIMIT ]] && pushover "No critical htlcs found.\n$numhtlcs pending htlc(s)"
   exit 0
